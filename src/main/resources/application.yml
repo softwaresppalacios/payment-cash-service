@@ -1,0 +1,18 @@
+server:
+  port: 8084
+spring:
+  application:
+    name: payment-cash-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/payment_cash_service_db?currentSchema=payment_cash_service}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:root}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        default_schema: payment_cash_service
+  sql:
+    init:
+      mode: always
