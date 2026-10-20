@@ -1,10 +1,19 @@
 package com.sp.parking.payment.web.controller;
 
 import com.sp.parking.payment.application.service.PaymentService;
+import com.sp.parking.payment.application.service.PaymentService.Cashier;
+import com.sp.parking.payment.domain.model.CashSessionStatus;
+import com.sp.parking.payment.infraestructure.security.RequireRole;
+import com.sp.parking.payment.infraestructure.security.TenantAccessFilter;
 import com.sp.parking.payment.web.dto.PaymentDtos.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -14,13 +23,64 @@ public class PaymentController {
   private final PaymentService paymentService;
 
   @PostMapping("/payments")
-  public PaymentResponse create(@RequestHeader("X-Tenant-Id") UUID tenantId, @Valid @RequestBody CreatePaymentRequest request) {
-    return paymentService.create(tenantId, request);
+  @ResponseStatus(HttpStatus.CREATED)
+  public PaymentResponse register(
+    @RequestHeader("X-Tenant-Id") UUID tenantId,
+    @RequestAttribute(TenantAccessFilter.USER_ATTRIBUTE) UUID userUuid,
+    @RequestAttribute(TenantAccessFilter.USER_NAME_ATTRIBUTE) String userName,
+    @Valid @RequestBody RegisterPaymentRequest request
+  ) {
+    return paymentService.register(tenantId, new Cashier(userUuid, userName), request);
+  }
+
+  @GetMapping("/payments/today")
+  public TodaySummaryResponse today(@RequestHeader("X-Tenant-Id") UUID tenantId) {
+    return paymentService.today(tenantId);
   }
 
   @GetMapping("/cash-sessions/current")
-  public CashSummaryResponse current(@RequestHeader("X-Tenant-Id") UUID tenantId) {
-    return paymentService.today(tenantId);
+  public CurrentCashResponse current(@RequestHeader("X-Tenant-Id") UUID tenantId) {
+    return paymentService.current(tenantId);
+  }
+
+  @PostMapping("/cash-sessions/open")
+  @ResponseStatus(HttpStatus.CREATED)
+  public CashSessionResponse open(
+    @RequestHeader("X-Tenant-Id") UUID tenantId,
+    @RequestAttribute(TenantAccessFilter.USER_ATTRIBUTE) UUID userUuid,
+    @RequestAttribute(TenantAccessFilter.USER_NAME_ATTRIBUTE) String userName,
+    @Valid @RequestBody OpenCashSessionRequest request
+  ) {
+    return paymentService.open(tenantId, new Cashier(userUuid, userName), request);
+  }
+
+  @PostMapping("/cash-sessions/current/close")
+  public CashSessionResponse close(
+    @RequestHeader("X-Tenant-Id") UUID tenantId,
+    @RequestAttribute(TenantAccessFilter.USER_ATTRIBUTE) UUID userUuid,
+    @RequestAttribute(TenantAccessFilter.USER_NAME_ATTRIBUTE) String userName,
+    @Valid @RequestBody CloseCashSessionRequest request
+  ) {
+    return paymentService.close(tenantId, new Cashier(userUuid, userName), request);
+  }
+
+  /** Historial de turnos; por defecto el mes en curso. */
+  @GetMapping("/cash-sessions")
+  @RequireRole({"OWNER", "ADMIN"})
+  public List<CashSessionResponse> history(
+    @RequestHeader("X-Tenant-Id") UUID tenantId,
+    @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+    @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+    @RequestParam(value = "status", required = false) CashSessionStatus status,
+    @RequestParam(value = "responsible", required = false) String responsible
+  ) {
+    LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
+    return paymentService.history(tenantId, from == null ? today.withDayOfMonth(1) : from, to == null ? today : to, status, responsible);
+  }
+
+  @GetMapping("/cash-sessions/{sessionUuid}")
+  @RequireRole({"OWNER", "ADMIN"})
+  public CashSessionResponse detail(@RequestHeader("X-Tenant-Id") UUID tenantId, @PathVariable("sessionUuid") UUID sessionUuid) {
+    return paymentService.detail(tenantId, sessionUuid);
   }
 }
-
