@@ -1,5 +1,6 @@
 package com.sp.parking.payment.web.controller;
 
+import com.sp.parking.payment.infraestructure.client.AuditClient;
 import com.sp.parking.payment.application.service.PaymentService;
 import com.sp.parking.payment.application.service.PaymentService.Cashier;
 import com.sp.parking.payment.domain.model.CashSessionStatus;
@@ -21,6 +22,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PaymentController {
   private final PaymentService paymentService;
+  private final AuditClient auditClient;
 
   @PostMapping("/payments")
   @ResponseStatus(HttpStatus.CREATED)
@@ -31,6 +33,18 @@ public class PaymentController {
     @Valid @RequestBody RegisterPaymentRequest request
   ) {
     return paymentService.register(tenantId, new Cashier(userUuid, userName), request);
+  }
+
+  /** Cobros por rango de fechas para reportes; por defecto el mes en curso. */
+  @GetMapping("/payments")
+  @RequireRole({"OWNER", "ADMIN"})
+  public List<PaymentResponse> payments(
+    @RequestHeader("X-Tenant-Id") UUID tenantId,
+    @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+    @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+  ) {
+    LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
+    return paymentService.payments(tenantId, from == null ? today.withDayOfMonth(1) : from, to == null ? today : to);
   }
 
   @GetMapping("/payments/today")
@@ -51,7 +65,9 @@ public class PaymentController {
     @RequestAttribute(TenantAccessFilter.USER_NAME_ATTRIBUTE) String userName,
     @Valid @RequestBody OpenCashSessionRequest request
   ) {
-    return paymentService.open(tenantId, new Cashier(userUuid, userName), request);
+    CashSessionResponse opened = paymentService.open(tenantId, new Cashier(userUuid, userName), request);
+    auditClient.record(tenantId, "CASH_OPEN", "CASH_SESSION", "Turno " + AuditClient.when(opened.openedAt()), "Base inicial " + AuditClient.money(opened.openingFloat()));
+    return opened;
   }
 
   @PostMapping("/cash-sessions/current/close")
@@ -61,7 +77,13 @@ public class PaymentController {
     @RequestAttribute(TenantAccessFilter.USER_NAME_ATTRIBUTE) String userName,
     @Valid @RequestBody CloseCashSessionRequest request
   ) {
-    return paymentService.close(tenantId, new Cashier(userUuid, userName), request);
+    CashSessionResponse closed = paymentService.close(tenantId, new Cashier(userUuid, userName), request);
+    auditClient.record(tenantId, "CASH_CLOSE", "CASH_SESSION", "Turno " + AuditClient.when(closed.openedAt()), String.join(" · ",
+      "Total " + AuditClient.money(closed.totals() == null ? null : closed.totals().total()),
+      "Efectivo esperado " + AuditClient.money(closed.expectedCash()),
+      "Contado " + AuditClient.money(closed.countedCash()),
+      "Diferencia " + AuditClient.money(closed.cashDifference())));
+    return closed;
   }
 
   /** Historial de turnos; por defecto el mes en curso. */

@@ -14,6 +14,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
@@ -126,6 +127,18 @@ public class PaymentService {
       : paymentRepository.findBySessionIdIn(openIds).stream().collect(Collectors.groupingBy(payment -> payment.getSession().getId()));
     return filtered.stream()
       .map(session -> toResponse(session, openPayments.getOrDefault(session.getId(), List.of()), false))
+      .toList();
+  }
+
+  /** Cobros (parqueo y mensualidades) pagados en el rango de fechas, dias de Colombia; del mas reciente al mas antiguo. */
+  @Transactional(readOnly = true)
+  public List<PaymentResponse> payments(UUID tenantId, LocalDate from, LocalDate to) {
+    if (to.isBefore(from)) throw new ResponseStatusException(BAD_REQUEST, "La fecha inicio debe ser anterior a la fecha fin");
+    if (from.plusDays(366).isBefore(to)) throw new ResponseStatusException(BAD_REQUEST, "El rango máximo es de un año");
+    return paymentRepository.findByTenantIdAndPaidAtGreaterThanEqualAndPaidAtLessThan(
+        tenantId, from.atStartOfDay(ZONE).toInstant(), to.plusDays(1).atStartOfDay(ZONE).toInstant()).stream()
+      .sorted(Comparator.comparing(Payment::getPaidAt).reversed())
+      .map(this::toResponse)
       .toList();
   }
 
